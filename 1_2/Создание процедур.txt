@@ -1,0 +1,142 @@
+create or replace procedure ds.fill_account_turnover_f(i_on_date date)
+language plpgsql
+as $$
+begin
+    delete from dm.dm_account_turnover_f where on_date = i_on_date;
+
+    insert into dm.dm_account_turnover_f (
+        on_date, account_rk, credit_amount, credit_amount_rub,
+        debet_amount, debet_amount_rub
+    )
+    select
+        i_on_date,
+        acc.account_rk,
+        coalesce(sum(case when p.credit_account_rk = acc.account_rk then p.credit_amount else 0 end), 0) as credit_amount,
+        coalesce(sum(case when p.credit_account_rk = acc.account_rk then p.credit_amount * coalesce(er.reduced_cource, 1) else 0 end), 0) as credit_amount_rub,
+        coalesce(sum(case when p.debet_account_rk = acc.account_rk then p.debet_amount else 0 end), 0) as debet_amount,
+        coalesce(sum(case when p.debet_account_rk = acc.account_rk then p.debet_amount * coalesce(er.reduced_cource, 1) else 0 end), 0) as debet_amount_rub
+    from ds.ft_posting_f p
+    join ds.md_account_d acc on (p.credit_account_rk = acc.account_rk or p.debet_account_rk = acc.account_rk)
+        and acc.data_actual_date <= i_on_date 
+        and coalesce(acc.data_actual_end_date, i_on_date) >= i_on_date
+    left join ds.md_exchange_rate_d er on er.currency_rk = acc.currency_rk 
+        and er.data_actual_date <= i_on_date 
+        and coalesce(er.data_actual_end_date, i_on_date) >= i_on_date
+    where p.oper_date = i_on_date
+    group by acc.account_rk;
+
+    insert into logs.runs_log(start_date, end_date, discription) 
+    values (current_timestamp::timestamp, current_timestamp::timestamp, 'Обороты за ' || i_on_date || ' рассчитаны.');
+
+    raise notice 'Обороты за % рассчитаны.', i_on_date;
+end;
+$$;
+
+call ds.fill_account_turnover_f('2018-01-09');
+
+do $$
+declare
+    d date := date '2018-01-01';
+begin
+    while d <= date '2018-01-31' loop
+        call ds.fill_account_turnover_f(d);
+        d := d + interval '1 day';
+    end loop;
+end $$;
+
+select * from dm.dm_account_turnover_f;
+
+
+
+
+create or replace procedure ds.fill_account_balance_f()
+language plpgsql
+as $$
+begin
+    delete from dm.dm_account_balance_f where on_date = date '2017-12-31';
+
+    insert into dm.dm_account_balance_f (on_date, account_rk, balance_out, balance_out_rub)
+    select
+        date '2017-12-31',
+        b.account_rk,
+        b.balance_out,
+        b.balance_out * coalesce(er.reduced_cource, 1)
+    from ds.ft_balance_f b
+    left join ds.md_account_d acc on acc.account_rk = b.account_rk
+    left join ds.md_exchange_rate_d er on er.currency_rk = b.currency_rk
+        and er.data_actual_date <= date '2017-12-31'
+        and coalesce(er.data_actual_end_date, date '2017-12-31') >= date '2017-12-31';
+
+    insert into logs.runs_log(start_date, end_date, discription) 
+    values (current_timestamp::timestamp, current_timestamp::timestamp, 'Остатки на 2017-12-31 перенесены.');
+
+    raise notice 'Остатки на 2017-12-31 перенесены.';
+end;
+$$;
+
+
+
+create or replace procedure ds.fill_account_balance_f(i_on_date date)
+language plpgsql
+as $$
+begin
+
+    delete from dm.dm_account_balance_f
+    where on_date = i_on_date;
+
+    insert into dm.dm_account_balance_f (
+        on_date, account_rk, balance_out, balance_out_rub
+    )
+    select
+        i_on_date,
+        acc.account_rk,
+        case acc.char_type
+            when 'А' then coalesce(prev.balance_out, 0) + coalesce(turnover.debet_amount, 0) - coalesce(turnover.credit_amount, 0)
+            when 'П' then coalesce(prev.balance_out, 0) - coalesce(turnover.debet_amount, 0) + coalesce(turnover.credit_amount, 0)
+            else 0
+        end as balance_out,
+        case acc.char_type
+            when 'А' then coalesce(prev.balance_out_rub, 0) + coalesce(turnover.debet_amount_rub, 0) - coalesce(turnover.credit_amount_rub, 0)
+            when 'П' then coalesce(prev.balance_out_rub, 0) - coalesce(turnover.debet_amount_rub, 0) + coalesce(turnover.credit_amount_rub, 0)
+            else 0
+        end as balance_out_rub
+    from ds.md_account_d acc
+    left join dm.dm_account_balance_f prev on prev.account_rk = acc.account_rk 
+		and prev.on_date = i_on_date - interval '1 day'
+    left join dm.dm_account_turnover_f turnover on turnover.account_rk = acc.account_rk 
+		and turnover.on_date = i_on_date
+    where acc.data_actual_date <= i_on_date 
+		and coalesce(acc.data_actual_end_date, i_on_date) >= i_on_date;
+
+    insert into logs.runs_log(start_date, end_date, discription)
+    values (
+        current_timestamp::timestamp,
+        current_timestamp::timestamp,
+        'Остатки за ' || i_on_date || ' рассчитаны.'
+    );
+
+    raise notice 'Остатки за % рассчитаны.', i_on_date;
+end;
+$$;
+
+
+
+call ds.fill_account_balance_f();
+
+call ds.fill_account_balance_f('2018-01-01');
+
+do $$
+declare
+    d date := date '2018-01-01';
+begin
+    while d <= date '2018-01-31' loop
+        call ds.fill_account_balance_f(d);
+        d := d + interval '1 day';
+    end loop;
+end $$;
+
+select * from dm.dm_account_balance_f;
+
+select * from logs.runs_log;
+
+truncate dm.dm_account_balance_f, logs.runs_log, dm.dm_account_turnover_f;
