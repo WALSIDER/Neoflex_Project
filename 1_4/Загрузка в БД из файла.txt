@@ -1,0 +1,55 @@
+import psycopg2
+import csv
+from datetime import datetime
+
+# Данные для подключения к БД
+conn = psycopg2.connect(
+    dbname="Neoflex",
+    user="postgres",
+    password="1234567890",
+    host="localhost",
+    port="5353"
+)
+
+cur = conn.cursor()
+
+csv_path = r"D:\Users\Vladislav\Decktop\f101_jan18.csv"
+
+try:
+    # Открываем CSV
+    with open(csv_path, newline='', encoding='cp1251') as f:
+        reader = csv.reader(f, delimiter=';')
+        headers = next(reader)  # Читаем заголовок
+
+        # Формируем запрос на вставку с нужным количеством параметров
+        placeholders = ','.join(['%s'] * len(headers))
+        insert_query = f"INSERT INTO dm.dm_f101_round_f_v2 ({', '.join(headers)}) VALUES ({placeholders})"
+
+        # Удаляем все данные из таблицы перед загрузкой
+        cur.execute("DELETE FROM dm.dm_f101_round_f_v2")
+
+        # Загружаем строки из CSV
+        for row in reader:
+            clean_row = [None if cell == '' else cell for cell in row]
+            cur.execute(insert_query, clean_row)
+
+    conn.commit()
+    print(f"Данные из {csv_path} загружены в dm.dm_f101_round_f_v2")
+
+    # Логирование
+    now = datetime.now()
+    log_text = f"Данные из {csv_path} загружены в dm_f101_round_f_v2"
+    cur.execute(
+        "INSERT INTO logs.runs_log (start_date, end_date, discription) VALUES (%s, %s, %s)",
+        (now, now, log_text)
+    )
+    conn.commit()
+    print("Лог операции добавлен")
+
+except Exception as e:
+    print("Ошибка:", e)
+    conn.rollback()
+
+finally:
+    cur.close()
+    conn.close()

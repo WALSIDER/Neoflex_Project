@@ -1,0 +1,50 @@
+import psycopg2
+import csv
+import os
+from datetime import datetime
+
+# Данные для подключения к БД
+conn = psycopg2.connect(
+    dbname="Neoflex",
+    user="postgres",
+    password="1234567890",
+    host="localhost",
+    port="5353"
+)
+
+# Курсор для выполнения SQL
+cur = conn.cursor()
+
+# Путь к файлу на рабочем столе
+desktop_path = r"D:\Users\Vladislav\Decktop\f101_jan18.csv"
+
+try:
+    # Запрос
+    cur.execute("SELECT * FROM dm.dm_f101_round_f")
+
+    # Запись данных в CSV
+    with open(desktop_path, "w", newline='', encoding="windows-1251") as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow([desc[0] for desc in cur.description])
+        for row in cur:
+            writer.writerow(row)
+
+    # Добавление лога
+    now = datetime.now()
+    log_text = f"Дамп dm_f101_round_f сохранён в файл {desktop_path}"
+    cur.execute(
+        "INSERT INTO logs.runs_log (start_date, end_date, discription) VALUES (%s, %s, %s)",
+        (now, now, log_text)
+    )
+    conn.commit()
+    print("Лог успешно добавлен в таблицу logs.runs_log")
+
+    print(f"Данные успешно сохранены в {desktop_path}")
+    print(desktop_path)
+
+except Exception as e:
+    print("Ошибка:", e)
+    conn.rollback()
+
+cur.close()
+conn.close()
