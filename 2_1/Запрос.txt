@@ -1,0 +1,23 @@
+select * from dm.client;
+
+SELECT 
+    client_rk, 
+    effective_from_date,
+    COUNT(*) AS count
+FROM dm.client
+GROUP BY client_rk, effective_from_date
+HAVING COUNT(*) > 1;
+
+
+WITH marked AS (
+    SELECT c.ctid,
+           ROW_NUMBER() OVER (
+               PARTITION BY client_rk, effective_from_date
+               ORDER BY effective_to_date DESC NULLS LAST
+           ) AS rn
+    FROM dm.client c
+)
+DELETE FROM dm.client
+WHERE ctid IN (
+    SELECT ctid FROM marked WHERE rn > 1
+);
