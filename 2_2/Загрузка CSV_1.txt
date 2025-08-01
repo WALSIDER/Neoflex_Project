@@ -1,0 +1,72 @@
+import psycopg2
+import csv
+from datetime import datetime
+
+# Параметры подключения
+conn = psycopg2.connect(
+    dbname="dwh",
+    user="postgres",
+    password="1234567890",
+    host="localhost",
+    port="5353"
+)
+cur = conn.cursor()
+
+# Путь к актуальному CSV-файлу
+csv_path = r"D:\Users\Vladislav\Decktop\Neoflex\Проектное задание\2\data\data\loan_holiday_info\product_info.csv"
+
+# Читаем CSV в память
+product_rows = []
+with open(csv_path, newline='', encoding='cp1251') as f:
+    reader = csv.DictReader(f, delimiter=',')
+    print("Заголовки CSV:", reader.fieldnames)
+    for row in reader:
+        # Убираем пробелы, приводим пустые строки к None
+        cleaned_row = {k: (v.strip() if v and v.strip() != '' else None) for k, v in row.items()}
+        product_rows.append(cleaned_row)
+
+# Получаем недостающие пары
+cur.execute("""
+    SELECT DISTINCT d.product_rk, d.effective_from_date::text
+    FROM rd.deal_info d
+    LEFT JOIN rd.product p
+      ON d.product_rk = p.product_rk AND d.effective_from_date = p.effective_from_date
+    WHERE p.product_rk IS NULL
+""")
+missing_keys_raw = cur.fetchall()
+
+# Приводим к set для быстрого поиска
+missing_keys = set((int(prk), eff_date) for prk, eff_date in missing_keys_raw)
+
+# Фильтруем строки из CSV по недостающим ключам
+to_insert = []
+for row in product_rows:
+    try:
+        prk = int(row['product_rk']) if row['product_rk'] is not None else None
+        eff_date = row['effective_from_date']
+    except Exception:
+        continue  # Если данные невалидны — пропускаем
+
+    if prk is not None and eff_date is not None and (prk, eff_date) in missing_keys:
+        to_insert.append(row)
+
+# Загружаем недостающие строки в rd.product
+if to_insert:
+    insert_query = """
+        INSERT INTO rd.product (product_rk, product_name, effective_from_date, effective_to_date)
+        VALUES (%s, %s, %s, %s)
+    """
+    for r in to_insert:
+        cur.execute(insert_query, (
+            int(r['product_rk']),
+            r['product_name'],
+            r['effective_from_date'],
+            r['effective_to_date']
+        ))
+    conn.commit()
+    print(f"Загружено {len(to_insert)} недостающих строк в rd.product")
+else:
+    print("Все записи уже присутствуют. Загрузка не требуется.")
+
+cur.close()
+conn.close()

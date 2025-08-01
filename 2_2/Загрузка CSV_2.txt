@@ -1,0 +1,50 @@
+import psycopg2
+import csv
+
+conn = psycopg2.connect(
+    dbname="dwh",
+    user="postgres",
+    password="1234567890",
+    host="localhost",
+    port="5353"
+)
+cur = conn.cursor()
+
+csv_path = r"D:\Users\Vladislav\Decktop\Neoflex\Проектное задание\2\data\data\loan_holiday_info\deal_info.csv"
+
+with open(csv_path, newline='', encoding='cp1251') as f:
+    reader = csv.DictReader(f)
+    rows = []
+    for r in reader:
+        row = (
+            int(r['deal_rk']) if r['deal_rk'].strip() else None,
+            r['deal_num'].strip() if r['deal_num'].strip() else None,
+            r['deal_name'].strip() if r['deal_name'].strip() else None,
+            float(r['deal_sum']) if r['deal_sum'].strip() else None,
+            int(r['client_rk']) if r['client_rk'].strip() else None,
+            int(r['account_rk']) if r['account_rk'].strip() else None,
+            int(r['agreement_rk']) if r['agreement_rk'].strip() else None,
+            r['deal_start_date'].strip() if r['deal_start_date'].strip() else None,
+            int(r['department_rk']) if r['department_rk'].strip() else None,
+            int(r['product_rk']) if r['product_rk'].strip() else None,
+            r['deal_type_cd'].strip() if r['deal_type_cd'].strip() else None,
+            r['effective_from_date'].strip() if r['effective_from_date'].strip() else None,
+            r['effective_to_date'].strip() if r['effective_to_date'].strip() else None
+        )
+        rows.append(row)
+
+# Вставка новых строк
+cur.executemany("""
+    INSERT INTO rd.deal_info (
+        deal_rk, deal_num, deal_name, deal_sum, client_rk,
+        account_rk, agreement_rk, deal_start_date, department_rk,
+        product_rk, deal_type_cd, effective_from_date, effective_to_date
+    )
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT DO NOTHING
+""", rows)
+
+conn.commit()
+print(f"Загружено строк: {len(rows)}")
+cur.close()
+conn.close()
