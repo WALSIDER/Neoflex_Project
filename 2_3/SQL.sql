@@ -1,0 +1,62 @@
+SELECT 
+    curr.account_rk,
+    curr.effective_date,
+    curr.account_in_sum AS wrong_account_in_sum,
+    prev.account_out_sum AS correct_account_in_sum
+FROM rd.account_balance curr
+JOIN rd.account_balance prev ON curr.account_rk = prev.account_rk
+ 	AND curr.effective_date = prev.effective_date + INTERVAL '1 day'
+WHERE curr.account_in_sum IS DISTINCT FROM prev.account_out_sum;
+
+
+SELECT 
+    prev.account_rk,
+    prev.effective_date AS incorrect_effective_date,
+    prev.account_out_sum AS wrong_account_out_sum,
+    curr.effective_date AS reference_effective_date,
+    curr.account_in_sum AS correct_account_out_sum
+FROM rd.account_balance prev
+JOIN rd.account_balance curr ON curr.account_rk = prev.account_rk
+ 	AND curr.effective_date = prev.effective_date + INTERVAL '1 day'
+WHERE prev.account_out_sum IS DISTINCT FROM curr.account_in_sum;
+
+
+UPDATE rd.account_balance curr
+SET account_in_sum = prev.account_out_sum
+FROM rd.account_balance prev
+WHERE curr.account_rk = prev.account_rk
+  AND curr.effective_date = prev.effective_date + INTERVAL '1 day'
+  AND curr.account_in_sum IS DISTINCT FROM prev.account_out_sum;
+
+
+CREATE OR REPLACE PROCEDURE dm.refill_account_balance_turnover()
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    DELETE FROM dm.account_balance_turnover;
+
+    INSERT INTO dm.account_balance_turnover (
+        account_rk,
+        currency_name,
+        department_rk,
+        effective_date,
+        account_in_sum,
+        account_out_sum
+    )
+    SELECT
+        ab.account_rk,
+        c.currency_name,
+        a.department_rk,
+        ab.effective_date AS effective_date,
+        ab.account_in_sum,
+        ab.account_out_sum
+    FROM rd.account_balance ab
+    JOIN rd.account a
+      ON ab.account_rk = a.account_rk
+    LEFT JOIN dm.dict_currency c
+      ON a.currency_cd = c.currency_cd;
+END;
+$$;
+
+
+CALL dm.refill_account_balance_turnover();
